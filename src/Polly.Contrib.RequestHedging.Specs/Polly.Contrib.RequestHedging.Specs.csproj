@@ -1,13 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netcoreapp1.1;netcoreapp2.0;netcoreapp3.0;net461;net472</TargetFrameworks>
-    <AssemblyOriginatorKeyFile>..\Polly.Contrib.BlankTemplate.snk</AssemblyOriginatorKeyFile>
+    <TargetFrameworks>netcoreapp3.0</TargetFrameworks>
+    <AssemblyOriginatorKeyFile>..\Polly.Contrib.RequestHedging.snk</AssemblyOriginatorKeyFile>
     <SignAssembly>true</SignAssembly>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Polly.Contrib.BlankTemplate\Polly.Contrib.BlankTemplate.csproj" />
+    <ProjectReference Include="..\Polly.Contrib.RequestHedging\Polly.Contrib.RequestHedging.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -17,9 +17,4 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.4.0" />
     <DotNetCliToolReference Include="dotnet-xunit" Version="2.3.1" />
   </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)'=='net462' or '$(TargetFramework)'=='net472'">
-    <Reference Include="Microsoft.CSharp" />
-  </ItemGroup>
-
 </Project>

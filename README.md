@@ -1,23 +1,18 @@
-# Polly.Contrib.BlankTemplate
+# Polly.Contrib.RequestHedging
 
-Polly.Contrib.BlankTemplate is blank template to use a starting point to develop contributions to Polly.Contrib.
+Polly.Contrib.RequestHedginge allow the sequential and delayed execution of a set of tasks, until one of them completes successfully or until all of them are completed.
+First task that is successfully completed triggers the cancellation and disposal of all other tasks and/or adjacent allocated resources.
 
-_If you are looking to develop a custom policy, start instead from the repo_ [Polly.Contrib.CustomPolicyTemplates](https://github.com/Polly-Contrib/Polly.Contrib.CustomPolicyTemplates).
+# Installing via NuGet
 
-## How to use the template
+    Install-Package Polly.Contrib.RequestHedging
 
-This repo is essentially just a blank template of a solution that:
+# Usage
 
-+ references [Polly](https://github.com/App-vNext/Polly)
-+ contains multi-targeting for the current compilation targets which Polly supports
-  - builds against Net Standard 1.1 and Net Standard 2.0
-  - tests againt .Net Core 1.1, .Net core 2.0, .Net Framework 4.6.2, .Net Framework 4.7.2
-+ contains a build script which builds to a nuget package styled  `Polly.Contrib.X`
+``` C#
+PolicyBuilder[<TResult>] policyBuilder;
 
-## Getting your contribution included in Polly.Contrib
-
-Reach out to the Polly team at our [slack channel](http://pollytalk.slack.com) or the main [Polly project Github](https://github.com/App-vNext/Polly).
-
-We can set up a repo in the Polly.Contrib organisation - you'll have full rights to this repo, to manage and deliver your awesomeness to the Polly community!
-
-If you already have your contribution in a github repo, we can also just move the existing repo into the Polly.Contrib org - you still retain full rights over the repo and management of the content, but the contrib gets official recognition under the Polly.Contrib banner.
+policyBuilder.HedgeAsync(maxAttemptCount: 2,
+            hedgingDelay: TimeSpan.FromMilliseconds(100),
+            onHedgeAsync: context => Task.CompletedTask);
+```

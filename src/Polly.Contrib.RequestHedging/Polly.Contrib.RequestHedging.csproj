@@ -5,10 +5,6 @@
     <AssemblyName>Polly.Contrib.RequestHedging</AssemblyName>
     <RootNamespace>Polly.Contrib.RequestHedging</RootNamespace>
     <Version>0.1.0</Version>
-    <AssemblyVersion>0.0.0.0</AssemblyVersion>
-    <FileVersion>0.1.0.0</FileVersion>
-    <InformationalVersion>0.1.0.0</InformationalVersion>
-    <PackageVersion>0.1.0</PackageVersion>
     <Company>App vNext</Company>
     <Copyright>Copyright (c) 2019, App vNext and contributors</Copyright>
     <Description>Polly.Contrib.RequestHedging implements the Request Hedging policy, integrating with the Polly resilience project for .NET</Description>
@@ -25,11 +21,8 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
   <ItemGroup Label="SourceLink">
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0-beta2-18618-05" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
   </ItemGroup>
-    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-    <Optimize>true</Optimize>
-  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Polly" Version="7.2.0" />
   </ItemGroup>

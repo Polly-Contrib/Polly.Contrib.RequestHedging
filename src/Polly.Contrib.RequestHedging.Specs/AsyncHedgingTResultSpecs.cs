@@ -199,5 +199,35 @@ namespace Polly.Contrib.RequestHedging.Specs
                         }, cts.Token));
             }
         }
+
+        [Fact]
+        public async Task First_Request_Completed_Successfully_Triggers_The_Cancellation_Of_All_Others()
+        {
+            var array = new[] { (5000, 3), (3500, 15), (100, 20) };
+            var count = 0;
+            var cancelled = 0;
+
+            Assert.Equal(20, await Policy<int>.HandleResult(x => x < 10).HedgeAsync(array.Length - 1, TimeSpan.FromMilliseconds(100))
+                .ExecuteAsync(async token =>
+                {
+                    var item = array[count++];
+
+                    try
+                    {
+                        await Task.Delay(item.Item1, token);
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        Interlocked.Increment(ref cancelled);
+
+                        throw;
+                    }
+
+                    return item.Item2;
+                }, CancellationToken.None));
+
+            Assert.Equal(2, cancelled);
+
+        }
     }
 }

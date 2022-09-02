@@ -98,51 +98,5 @@ namespace Polly.Contrib.RequestHedging.Specs
 
             Assert.Equal(maxAttemptCount, hedgeCount);
         }
-
-        [Fact]
-        public async Task Should_Return_The_Fastest_Result()
-        {
-            var array = new[]
-            {
-                (500, (Exception)new TimeoutException()),
-                (250, new InvalidOperationException()),
-                (200, new OperationCanceledException())
-            };
-            var count = 0;
-
-            await Assert.ThrowsAsync<InvalidOperationException>(() => Policy.Handle<Exception>()
-                .HedgeAsync(array.Length - 1, TimeSpan.FromMilliseconds(100))
-                .ExecuteAsync(async () =>
-                {
-                    var item = array[count++];
-
-                    await Task.Delay(item.Item1);
-
-                    throw item.Item2;
-                }));
-        }
-
-        [Fact]
-        public async Task Should_Return_The_Fastest_Result_Slowly()
-        {
-            var array = new[]
-            {
-                (500, (Exception)new TimeoutException()),
-                (350, new InvalidOperationException()),
-                (200, new OperationCanceledException())
-            };
-            var count = 0;
-
-            await Assert.ThrowsAsync<OperationCanceledException>(() => Policy.Handle<Exception>()
-                .HedgeAsync(array.Length - 1, TimeSpan.FromMilliseconds(100))
-                .ExecuteAsync(async () =>
-                {
-                    var item = array[count++];
-
-                    await Task.Delay(item.Item1);
-
-                    throw item.Item2;
-                }));
-        }
     }
 }

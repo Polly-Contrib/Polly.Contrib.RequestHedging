@@ -60,9 +60,10 @@ namespace Polly.Contrib.RequestHedging
             private readonly CancellationTokenSource _cts;
 
             private Exception _ex;
-            private int _hasResult;
+            private bool _hasResult;
             private TResult _result;
             private int _completedTasks;
+            private bool _disposed;
 
             public Task<TResult> Task => _tcs.Task;
 
@@ -103,7 +104,7 @@ namespace Polly.Contrib.RequestHedging
 
                     TryCheckTasksHasCompletion(completedTasks);
                 }
-                else if (_cts.IsCancellationRequested)
+                else if (!_disposed && _cts.IsCancellationRequested)
                 {
                     _tcs.TrySetCanceled(_cts.Token);
                 }
@@ -123,7 +124,7 @@ namespace Polly.Contrib.RequestHedging
 
                 if (matched)
                 {
-                    _hasResult = 1;
+                    _hasResult = true;
                     _result = result;
 
                     TryCheckTasksHasCompletion(completedTasks);
@@ -138,11 +139,11 @@ namespace Polly.Contrib.RequestHedging
             {
                 if (completedTasks < _maxTasks) return;
 
-                if (_hasResult > 0)
+                if (_hasResult)
                 {
                     _tcs.TrySetResult(_result);
                 }
-                else if (_cts.IsCancellationRequested)
+                else if (!_disposed && _cts.IsCancellationRequested)
                 {
                     _tcs.TrySetCanceled(_cts.Token);
                 }
@@ -159,6 +160,8 @@ namespace Polly.Contrib.RequestHedging
             public void Dispose()
             {
                 _cts.Cancel();
+
+                _disposed = true;
 
                 _cts.Dispose();
             }

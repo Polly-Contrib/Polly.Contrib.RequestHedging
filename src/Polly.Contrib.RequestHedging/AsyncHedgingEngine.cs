@@ -1,106 +1,169 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Polly.Utilities;
 
 namespace Polly.Contrib.RequestHedging
 {
     internal static class AsyncHedgingEngine
     {
         internal static async Task<TResult> ImplementationAsync<TResult>(
-            Func<Context, CancellationToken, Task<TResult>> action, Context context, CancellationToken cancellationToken,
-            Func<Context, Task> onHedgeAsync, TimeSpan hedgingDelay,
-            IEnumerable<Func<Context, CancellationToken, Task<TResult>>> hedgedTaskFunctions,
-            bool continueOnCapturedContext)
+            Func<Context, CancellationToken, Task<TResult>> action, Context context,
+            CancellationToken cancellationToken, ExceptionPredicates exceptionPredicates,
+            ResultPredicates<TResult> resultPredicates, Func<Context, Task> onHedgeAsync, TimeSpan hedgingDelay,
+            int maxAttemptCount, bool continueOnCapturedContext)
         {
-            IEnumerator<Func<Context, CancellationToken, Task<TResult>>> hedgedTaskFunctionsEnumerator = hedgedTaskFunctions?.GetEnumerator() ?? Enumerable.Empty<Func<Context, CancellationToken, Task<TResult>>>().GetEnumerator();
-
-            var cancellationTokenList = new List<CancellationTokenSource>();
-            var taskList = new List<Task<TResult>>();
-
-            try
+            using (var result = new HedgingResult<TResult>(maxAttemptCount + 1, cancellationToken))
             {
-                if (hedgedTaskFunctionsEnumerator.Current == null)
+                var now = DateTime.Now;
+
+                result.Execute(action, context, exceptionPredicates, resultPredicates,
+                    continueOnCapturedContext);
+
+                for (var index = 0; index < maxAttemptCount; index++)
                 {
-                    return await action(context, cancellationToken).ConfigureAwait(continueOnCapturedContext);
-                }
+                    var before = DateTime.Now - now;
 
-                taskList.Add(action(context, cancellationToken));
-
-                while (taskList.Any(x => !x.IsCompleted))
-                {
-                    var delayTask = SystemClock.SleepAsync(hedgingDelay, cancellationToken);
-                    var finishedTask = await Task.WhenAny(Task.WhenAny(taskList.Where(x => !x.IsCompleted)), delayTask).ConfigureAwait(continueOnCapturedContext);
-
-                    if (finishedTask != delayTask)
+                    var checkTask = true;
+                    if (hedgingDelay > before)
                     {
-                        // something completed before the delay, check and return the result if any
-                        foreach (var t in taskList)
-                        {
-                            if (t.Status == TaskStatus.RanToCompletion)
-                            {
-                                return t.Result;
-                            }
-                        }
+                        var delayTask = Task.Delay(hedgingDelay - before, cancellationToken);
+
+                        checkTask = await Task.WhenAny(result.Task, delayTask)
+                            .ConfigureAwait(continueOnCapturedContext) != delayTask;
                     }
 
-                    // no result returned, so maybe there is exception
-                    // fire off hedge request if there is any
-                    if (hedgedTaskFunctionsEnumerator.Current != null)
+                    // something completed before the delay, check and return the result if any
+                    if (checkTask && result.Task.IsCompleted)
                     {
-                        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                        cancellationTokenList.Add(cts);
-                        taskList.Add(hedgedTaskFunctionsEnumerator.Current(context, cts.Token));
-                        await onHedgeAsync(context).ConfigureAwait(false);
-                        hedgedTaskFunctionsEnumerator.MoveNext();
+                        break;
                     }
+
+                    now = DateTime.Now;
+
+                    // no result returned, so maybe there is result or exception match hedge request if there is any.
+                    result.Execute(action, context, exceptionPredicates, resultPredicates,
+                        continueOnCapturedContext);
+
+                    await onHedgeAsync(context).ConfigureAwait(continueOnCapturedContext);
                 }
 
-                // all the task are completed, check if any ran to completion
-                foreach (var t in taskList)
-                {
-                    if (t.Status == TaskStatus.RanToCompletion)
-                    {
-                        return t.Result;
-                    }
-                }
-
-                // still no result, throw first exception
-                foreach (var t in taskList)
-                {
-                    if (t.Status == TaskStatus.Faulted)
-                    {
-                        // this will rethrow the exception
-                        await t.ConfigureAwait(continueOnCapturedContext);
-                    }
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // we should never reach here now
-                throw new InvalidOperationException();
+                return result.Task.Status == TaskStatus.RanToCompletion
+                    ? result.Task.Result
+                    : await result.Task.ConfigureAwait(continueOnCapturedContext);
             }
-            finally
+        }
+
+        private class HedgingResult<TResult> : IDisposable
+        {
+            private readonly TaskCompletionSource<TResult> _tcs = new TaskCompletionSource<TResult>();
+            private readonly int _maxTasks;
+            private readonly CancellationTokenSource _cts;
+
+            private Exception _ex;
+            private bool _hasResult;
+            private TResult _result;
+            private int _completedTasks;
+            private bool _disposed;
+
+            public Task<TResult> Task => _tcs.Task;
+
+            public HedgingResult(int maxTasks, CancellationToken cancellationToken)
             {
-                // cancel all remaining tasks
-                foreach (var taskCts in cancellationTokenList)
-                {
-                    taskCts.Cancel();
-                    taskCts.Dispose();
-                }
+                _maxTasks = maxTasks;
 
-                // handle any faulted tasks
-                foreach (var t in taskList.Where(x => x.IsFaulted))
-                {
-                    if (t.IsFaulted)
-                    {
-                        t.Exception.Handle(_ => true);
-                    }
-                }
+                _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-                hedgedTaskFunctionsEnumerator?.Dispose();
+                _cts.Token.Register(Cancel);
+            }
+
+            private void Cancel() => _tcs.TrySetCanceled(_cts.Token);
+
+            public async void Execute(Func<Context, CancellationToken, Task<TResult>> action,
+                Context context, ExceptionPredicates exceptionPredicates,
+                ResultPredicates<TResult> resultPredicates, bool continueOnCapturedContext)
+            {
+                try
+                {
+                    var result = await action(context, _cts.Token).ConfigureAwait(continueOnCapturedContext);
+
+                    TrySetResult(resultPredicates.AnyMatch(result), result);
+                }
+                catch (Exception ex)
+                {
+                    TrySetException(exceptionPredicates.FirstMatchOrDefault(ex) != null, ex);
+                }
+            }
+
+            private void TrySetException(bool matched, Exception ex)
+            {
+                var completedTasks = Interlocked.Increment(ref _completedTasks);
+
+                if (matched)
+                {
+                    _ex = ex;
+
+                    TryCheckTasksHasCompletion(completedTasks);
+                }
+                else if (!_disposed && _cts.IsCancellationRequested)
+                {
+                    _tcs.TrySetCanceled(_cts.Token);
+                }
+                else if (ex is OperationCanceledException oe && oe.CancellationToken.IsCancellationRequested)
+                {
+                    _tcs.TrySetCanceled(oe.CancellationToken);
+                }
+                else
+                {
+                    _tcs.TrySetException(ex);
+                }
+            }
+
+            private void TrySetResult(bool matched, TResult result)
+            {
+                var completedTasks = Interlocked.Increment(ref _completedTasks);
+
+                if (matched)
+                {
+                    _hasResult = true;
+                    _result = result;
+
+                    TryCheckTasksHasCompletion(completedTasks);
+                }
+                else
+                {
+                    _tcs.TrySetResult(result);
+                }
+            }
+
+            private void TryCheckTasksHasCompletion(int completedTasks)
+            {
+                if (completedTasks < _maxTasks) return;
+
+                if (_hasResult)
+                {
+                    _tcs.TrySetResult(_result);
+                }
+                else if (!_disposed && _cts.IsCancellationRequested)
+                {
+                    _tcs.TrySetCanceled(_cts.Token);
+                }
+                else if (_ex is OperationCanceledException oe && oe.CancellationToken.IsCancellationRequested)
+                {
+                    _tcs.TrySetCanceled(oe.CancellationToken);
+                }
+                else
+                {
+                    _tcs.TrySetException(_ex ?? new InvalidOperationException());
+                }
+            }
+
+            public void Dispose()
+            {
+                _cts.Cancel();
+
+                _disposed = true;
+
+                _cts.Dispose();
             }
         }
     }
